@@ -14,10 +14,10 @@ use gui::{
 };
 use shadcn::{
     AlertVariant, BadgeVariant, ButtonSize, ButtonVariant, CheckedState, DialogState, Orientation, ResizableState,
-    Theme, alert, alert_description, alert_title, badge, button, checkbox_state, dialog_content, dialog_description,
-    dialog_footer, dialog_header, dialog_title, input, progress, provide_theme, resizable_handle, resizable_panel,
-    resizable_panel_group, spinner, switch, table, table_body, table_cell, table_empty, table_head, table_header,
-    table_row, theme,
+    Theme, ToggleSize, ToggleVariant, alert, alert_description, alert_title, badge, button, checkbox_state,
+    dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title, input, progress, provide_theme,
+    resizable_handle, resizable_panel, resizable_panel_group, spinner, table, table_body, table_cell, table_empty,
+    table_head, table_header, table_row, theme, toggle_variants,
 };
 
 use crate::model::{Action, Category, Item, Safety, human_size, tilde};
@@ -234,7 +234,7 @@ impl App {
                     resizable_panel_group(&self.panes)
                         .child(self.pane(0).child(self.sidebar(&s)))
                         .child(resizable_handle(&self.panes, 0, false))
-                        .child(self.pane(1).flex_col().child(self.toolbar(&s, &visible)).child(self.table(
+                        .child(self.pane(1).flex_col().child(self.toolbar(&s)).child(self.table(
                             &s,
                             &visible,
                             highlighted,
@@ -380,61 +380,36 @@ impl App {
             )
     }
 
-    fn toolbar(&self, s: &Session, visible: &[usize]) -> Div {
-        let (only, all) = (self.clone(), self.clone());
-        let vis = visible.to_vec();
-        let all_on = s.all_selected(visible);
+    /// One row: search, the only-selected filter, the age threshold where ages matter, Rescan and Clean.
+    fn toolbar(&self, s: &Session) -> Div {
+        let only = self.clone();
         let days = s.min_unused_days;
         let (less, more) = (self.clone(), self.clone());
         let ages_matter = matches!(s.tab, None | Some(Category::Build));
         div()
             .named("toolbar")
-            .flex_col()
+            .flex()
+            .items_center()
             .gap(3.0)
             .px(5.0)
             .pt(4.0)
             .pb(3.0)
+            .child(div().flex_1().min_w(40.0).max_w(80.0).child(input(&self.search).placeholder("Search…")))
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(3.0)
-                    .child(text(s.tab.map_or("Everything", Category::title)).text_lg().font_semibold().flex_1())
-                    .child(self.actions(s)),
+                toggle_variants(ToggleVariant::Outline, ToggleSize::Default, s.only_selected)
+                    .aria_label("Only selected")
+                    .on_click(move |_| only.edit(Session::toggle_only_selected))
+                    .child(icon(Icon::ListChecks)),
             )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(3.0)
-                    .child(div().w(72.0).child(input(&self.search).placeholder("Search name or path…")))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(2.0)
-                            .text_sm()
-                            .child(
-                                switch(&Signal::new(s.only_selected))
-                                    .on_click(move |_| only.edit(Session::toggle_only_selected)),
-                            )
-                            .child(text("Only selected").whitespace_nowrap()),
-                    )
-                    .child(div().flex_1())
-                    .child(ages_matter.then(|| {
-                        days_stepper(
-                            days,
-                            move || less.set_days(days.saturating_sub(1)),
-                            move || more.set_days(days.saturating_add(1)),
-                        )
-                    }))
-                    .child(
-                        button(ButtonVariant::Outline, ButtonSize::Sm)
-                            .disabled(visible.is_empty())
-                            .on_click(move |_| all.edit(|s| s.toggle_all(&vis)))
-                            .child(if all_on { "Clear all" } else { "Select all" }),
-                    ),
-            )
+            .child(div().flex_1())
+            .child(ages_matter.then(|| {
+                days_stepper(
+                    days,
+                    move || less.set_days(days.saturating_sub(1)),
+                    move || more.set_days(days.saturating_add(1)),
+                )
+            }))
+            .child(self.actions(s))
     }
 
     fn table(&self, s: &Session, visible: &[usize], highlighted: Option<usize>) -> Div {
@@ -442,8 +417,18 @@ impl App {
         let columns =
             [Track::Px(40.0), Track::Fr(1.0), Track::Px(80.0), Track::Px(72.0), Track::Px(84.0), Track::Px(84.0)];
         let right = |label: &str| table_head(div().w_full().text_right().child(label.to_owned()));
+        let all = self.clone();
+        let vis = visible.to_vec();
+        let ticked = visible.iter().filter(|&&n| s.items.get(n).is_some_and(|i| i.action.is_active())).count();
+        let all_state = if visible.is_empty() || ticked == 0 {
+            CheckedState::Unchecked
+        } else if s.all_selected(visible) {
+            CheckedState::Checked
+        } else {
+            CheckedState::Indeterminate
+        };
         let head = table_row(&columns, false)
-            .child(table_head(""))
+            .child(table_head(checkbox_state(all_state, move |_| all.edit(|s| s.toggle_all(&vis)))))
             .child(table_head("Item"))
             .child(right("Size"))
             .child(right("Unused"))
