@@ -38,6 +38,9 @@ const WALK_SKIP: &[&str] = &[
     "Applications",
 ];
 
+/// Folders that hold installed packages: never walked into, and build output inside one is a dependency's.
+const DEPENDENCY_DIRS: &[&str] = &[".git", "node_modules", "site-packages"];
+
 /// Everything a scan needs to know about this Mac.
 #[derive(Clone, Debug)]
 pub struct Scope {
@@ -271,7 +274,9 @@ fn walk_from(scope: &Scope, start: &Path, found: &[PathBuf]) -> Vec<Item> {
         let Ok(entries) = fs::read_dir(&dir) else { continue };
         for entry in entries.flatten() {
             let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-            if is_dir && entry.file_name() != ".git" {
+            let name = entry.file_name();
+            // A dependency tree holds installed packages, never a project of the owner's.
+            if is_dir && !DEPENDENCY_DIRS.iter().any(|d| name == *d) {
                 stack.push((entry.path(), depth.saturating_add(1)));
             }
         }
@@ -284,19 +289,27 @@ fn classify(scope: &Scope, dir: &Path) -> Option<Item> {
     let name = dir.file_name()?.to_string_lossy();
     let parent = dir.parent()?;
     if let Some(rule) = scope.rules.artifacts.iter().find(|r| r.dir == name && is_project(r, parent)) {
-        if !scope.deletable(dir) {
+        let inside_dependency = parent.components().any(|c| DEPENDENCY_DIRS.iter().any(|d| c.as_os_str() == *d));
+        if inside_dependency || !scope.deletable(dir) {
             return None;
         }
+        // Build output is a project's when the project is under version control; otherwise the folder may be what an
+        // installed tool runs from (a language server's node_modules), so the owner decides.
+        let in_repo = in_git_tree(parent, &scope.home);
         let project = parent.file_name().map_or_else(|| tilde_of(scope, parent), |n| n.to_string_lossy().into_owned());
         let mut i = item(
             scope,
             Category::Build,
             format!("{project} · {}", rule.dir),
             dir.to_path_buf(),
-            rule.safety,
+            if in_repo { rule.safety } else { rule.safety.max(Safety::Review) },
             Source::Rule(format!("{} next to {}", rule.dir, rule.markers.join(" or "))),
         );
-        i.note.clone_from(&rule.note);
+        i.note = if in_repo {
+            rule.note.clone()
+        } else {
+            format!("Not inside a git project, so it may belong to an installed tool. {}", rule.note)
+        };
         let manifest = rule.markers.iter().filter_map(|m| fs::symlink_metadata(parent.join(m)).ok()).map(|m| {
             use std::os::unix::fs::MetadataExt;
             m.mtime()
@@ -308,15 +321,26 @@ fn classify(scope: &Scope, dir: &Path) -> Option<Item> {
     if dir.join("CACHEDIR.TAG").is_file() && scope.deletable(dir) {
         let in_build_root = scope.cargo_build_root.as_ref().is_some_and(|r| dir.starts_with(r));
         let (category, label) = if in_build_root {
-            (Category::Build, format!("Cargo build · {}", tilde_of(scope, dir)))
+            let rel = scope.cargo_build_root.as_ref().and_then(|r| dir.strip_prefix(r).ok()).unwrap_or(dir);
+            (Category::Build, format!("Cargo build · {}", rel.display()))
         } else {
             (Category::Caches, name.into_owned())
         };
-        let mut i = item(scope, category, label, dir.to_path_buf(), Safety::Safe, Source::CacheDirTag);
+        // The tag says the contents can be rebuilt, but some tools tag what they run from too (uv tags every
+        // environment, including installed tools). Trust it where caches or build output live.
+        let in_cache_place = in_build_root
+            || [".cache", "Library/Caches"].iter().any(|c| dir.starts_with(scope.home.join(c)))
+            || in_git_tree(parent, &scope.home);
+        let safety = if in_cache_place { Safety::Safe } else { Safety::Review };
+        let mut i = item(scope, category, label, dir.to_path_buf(), safety, Source::CacheDirTag);
         i.note = if in_build_root {
             "Build output in Cargo's shared build dir; rebuilt the next time that workspace builds.".into()
-        } else {
+        } else if in_cache_place {
             "Its tool marked it as a cache it can rebuild.".into()
+        } else {
+            "Its tool marked it as rebuildable, but it is outside any cache folder or git project, so it may be an \
+             installed tool's environment."
+                .into()
         };
         i.days_unused = fsops::days_since(scope.now, fsops::newest_mtime(dir));
         return Some(i);
@@ -327,6 +351,11 @@ fn classify(scope: &Scope, dir: &Path) -> Option<Item> {
 fn is_project(rule: &ArtifactRule, parent: &Path) -> bool {
     let has = |names: &[String]| names.iter().any(|m| parent.join(m).exists());
     (rule.markers.is_empty() || has(&rule.markers)) && !has(&rule.unless)
+}
+
+/// Whether `dir` is inside a git work tree, looking up no further than `home`.
+fn in_git_tree(dir: &Path, home: &Path) -> bool {
+    dir.ancestors().take_while(|a| a.starts_with(home) && *a != home).any(|a| a.join(".git").exists())
 }
 
 fn tilde_of(scope: &Scope, path: &Path) -> String {
