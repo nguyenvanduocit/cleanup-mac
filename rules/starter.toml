@@ -1,0 +1,33 @@
+# Your own rules for Cleanup Mac.
+#
+# Cleanup Mac only lists what a rule describes. This file adds to its built-in list:
+#   https://github.com/nguyenvanduocit/cleanup-mac/blob/main/rules/default.toml
+# Remove the "# " in front of an example to use it, save, then click Rescan in the window.
+#
+# safety decides whether an item starts ticked:
+#   "safe"    the tool rebuilds it by itself; ticked
+#   "review"  it rebuilds, but slowly or with side effects; not ticked
+#   "manual"  only you can judge; not ticked
+
+# A folder that is a cache: the tool downloads or rebuilds it when it is gone.
+#
+# [[cache]]
+# id = "my-tool"
+# name = "My tool's downloads"
+# paths = ["~/.my-tool/downloads"]
+# safety = "safe"
+# note = "Downloaded again on next use."
+
+# A build folder: a folder with this name, next to one of these files, in any project.
+#
+# [[artifact]]
+# dir = "dist"
+# markers = ["package.json"]
+# safety = "review"
+# note = "Build output; `npm run build` makes it again."
+
+# Turn a built-in rule off: use its id (or dir, for build folders) and enabled = false.
+#
+# [[cache]]
+# id = "maven"
+# enabled = false

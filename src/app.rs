@@ -49,7 +49,9 @@ pub fn run(scope: Scope, rules_error: Option<String>) -> ! {
 #[derive(Clone)]
 struct App {
     scope: Rc<Scope>,
-    rules_error: Option<String>,
+    /// Read again at every scan, so edits to the user's file apply on Rescan.
+    rules: Signal<Rc<rules::Rules>>,
+    rules_error: Signal<Option<String>>,
     session: Signal<Rc<Session>>,
     free_kb: Signal<Option<u64>>,
     full_disk_access: Signal<bool>,
@@ -70,8 +72,9 @@ impl App {
             session: Signal::labeled("session", Rc::new(Session::new(scope.min_unused_days))),
             free_kb: Signal::labeled("free-kb", fsops::free_kb()),
             full_disk_access: Signal::labeled("full-disk-access", fsops::has_full_disk_access(&scope.home)),
+            rules: Signal::labeled("rules", Rc::new(scope.rules.clone())),
+            rules_error: Signal::labeled("rules-error", rules_error),
             scope: Rc::new(scope),
-            rules_error,
             scan_rx: Rc::default(),
             exec_rx: Rc::default(),
             pumping: Rc::default(),
@@ -95,12 +98,16 @@ impl App {
     /// The scope as of now, with the session's threshold.
     fn fresh_scope(&self, min_unused_days: u64) -> Scope {
         let mut scope = (*self.scope).clone();
+        scope.rules = (*self.rules.get()).clone();
         scope.now = crate::unix_now();
         scope.min_unused_days = min_unused_days;
         scope
     }
 
     fn start_scan(&self, session: Session) {
+        let (rules, error) = rules::load(&self.scope.home);
+        self.rules.set(Rc::new(rules));
+        self.rules_error.set(error);
         *self.scan_rx.borrow_mut() = Some(scan::spawn(self.fresh_scope(session.min_unused_days)));
         self.session.set(Rc::new(session));
         self.free_kb.set(fsops::free_kb());
@@ -225,7 +232,7 @@ impl App {
             .on_key_down(move |k| app.on_key(k))
             .child(self.header(&s))
             .child((!self.full_disk_access.get()).then(|| self.access_banner()))
-            .child(self.rules_error.as_ref().map(|e| rules_banner(e)))
+            .child(self.rules_error.get().map(|e| rules_banner(&e)))
             .child(
                 div().flex_1().min_h(0.0).child(
                     resizable_panel_group(&self.panes)
@@ -335,8 +342,9 @@ impl App {
 
         let days = s.min_unused_days;
         let (less, more) = (self.clone(), self.clone());
-        let rules_dir = self.scope.home.join(rules::USER_FILE).parent().map(std::path::Path::to_path_buf);
-        let rules = &self.scope.rules;
+        let home = self.scope.home.clone();
+        let rules = self.rules.get();
+        let hint = |s: &str| text(s.to_owned()).text_xs().text_color(t.muted_foreground);
         div()
             .named("sidebar")
             .flex_1()
@@ -350,39 +358,46 @@ impl App {
             .child(
                 div()
                     .flex_col()
-                    .gap(4.0)
+                    .gap(5.0)
                     .p(2.0)
-                    .child(stepper(
-                        "Select build output unused for",
-                        format!("{days}d"),
-                        move || less.set_days(days.saturating_sub(1)),
-                        move || more.set_days(days.saturating_add(1)),
-                    ))
                     .child(
                         div()
                             .flex_col()
                             .gap(1.5)
-                            .child(text("Rules").text_xs().text_color(t.muted_foreground))
+                            .child(stepper(
+                                "Tick build folders untouched for",
+                                if days == 1 { "1 day".into() } else { format!("{days} days") },
+                                move || less.set_days(days.saturating_sub(1)),
+                                move || more.set_days(days.saturating_add(1)),
+                            ))
+                            .child(hint("Newer ones are listed but left unticked, in case you are still using them.")),
+                    )
+                    .child(
+                        div()
+                            .flex_col()
+                            .gap(1.5)
+                            .child(text("What it looks for").text_xs().text_color(t.muted_foreground))
                             .child(
                                 text(format!(
-                                    "{} caches · {} build outputs · {} tools",
+                                    "{} cache folders, {} kinds of build folder, {} tool cleanups",
                                     rules.caches.len(),
                                     rules.artifacts.len(),
                                     rules.commands.len()
                                 ))
                                 .text_sm(),
                             )
+                            .child(hint("Add folders it misses, or stop it listing one. Rescan to apply."))
                             .child(
                                 button(ButtonVariant::Outline, ButtonSize::Sm)
                                     .on_click(move |_| {
-                                        if let Some(dir) = &rules_dir {
-                                            // Creating the folder lets Finder show where the file goes.
-                                            let _ = std::fs::create_dir_all(dir);
-                                            open(&dir.display().to_string());
+                                        // A text editor, not whatever app claims .toml files.
+                                        if let Ok(file) = rules::ensure_user_file(&home) {
+                                            let _ =
+                                                Command::new("open").arg("-t").arg(&file).stdin(Stdio::null()).spawn();
                                         }
                                     })
-                                    .child(icon(Icon::Folder))
-                                    .child("Add your own rules"),
+                                    .child(icon(Icon::Pencil))
+                                    .child("Edit the list"),
                             ),
                     ),
             )

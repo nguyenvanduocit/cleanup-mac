@@ -123,6 +123,23 @@ pub fn expand(path: &str, home: &Path) -> Option<PathBuf> {
 
 /// The rules in effect: built-in, then the user's file over them. A broken user file is reported, and the built-in
 /// rules still apply.
+/// What a new user rules file starts as: commented examples, no rules.
+pub const STARTER: &str = include_str!("../rules/starter.toml");
+
+/// The user's rules file, created from [`STARTER`] when it does not exist yet.
+pub fn ensure_user_file(home: &Path) -> std::io::Result<std::path::PathBuf> {
+    let file = home.join(USER_FILE);
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&file) {
+        Ok(mut f) => std::io::Write::write_all(&mut f, STARTER.as_bytes())?,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e),
+    }
+    Ok(file)
+}
+
 pub fn load(home: &Path) -> (Rules, Option<String>) {
     let built_in = Rules::parse(BUILT_IN).unwrap_or_default();
     let file = home.join(USER_FILE);
@@ -139,6 +156,12 @@ pub fn load(home: &Path) -> (Rules, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starter_file_adds_no_rules() {
+        let rules = Rules::parse(STARTER).expect("starter parses");
+        assert!(rules.caches.is_empty() && rules.artifacts.is_empty() && rules.commands.is_empty());
+    }
 
     #[test]
     fn built_in_rules_parse() {
