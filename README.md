@@ -64,6 +64,11 @@ cleanup-mac --rules
 
 ## Install
 
+Download the latest `Cleanup-Mac-<version>.zip` from [Releases](https://github.com/nguyenvanduocit/cleanup-mac/releases)
+(universal, signed and notarized), unzip it, and move **Cleanup Mac** to Applications.
+
+### From source
+
 Needs the Rust toolchain in `rust-toolchain.toml`.
 
 ```sh
@@ -71,6 +76,9 @@ SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" scripts/install-app
 ```
 
 This builds, bundles and signs `/Applications/Cleanup Mac.app`, and links `~/.cargo/bin/cleanup-mac` to its binary.
+`scripts/release.sh` builds the universal app, notarizes it and publishes a GitHub release (needs `SIGN_IDENTITY`
+and a `NOTARY_PROFILE` saved with `xcrun notarytool store-credentials`).
+
 Grant the app Full Disk Access (the window has a button for it); without it macOS hides parts of `~/Library` and
 the scan comes up short. Signing with a stable identity keeps that grant across reinstalls.
 

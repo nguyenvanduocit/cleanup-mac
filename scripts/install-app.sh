@@ -20,24 +20,7 @@ trap 'rm -rf "$STAGE"' EXIT
 BUNDLE="$STAGE/Cleanup Mac.app"
 mkdir -p "$BUNDLE/Contents/MacOS"
 cp target/release/cleanup-mac "$BUNDLE/Contents/MacOS/cleanup-mac"
-cat > "$BUNDLE/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleName</key><string>Cleanup Mac</string>
-  <key>CFBundleDisplayName</key><string>Cleanup Mac</string>
-  <key>CFBundleIdentifier</key><string>local.cleanup-mac</string>
-  <key>CFBundleExecutable</key><string>cleanup-mac</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundleVersion</key><string>$VERSION</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
-  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
-  <key>NSHighResolutionCapable</key><true/>
-</dict>
-</plist>
-PLIST
+scripts/info-plist.sh "$VERSION" > "$BUNDLE/Contents/Info.plist"
 
 codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$BUNDLE"
 codesign --verify --strict "$BUNDLE"

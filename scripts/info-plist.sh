@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Print the app bundle's Info.plist for the version given as $1.
+set -euo pipefail
+cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Cleanup Mac</string>
+  <key>CFBundleDisplayName</key><string>Cleanup Mac</string>
+  <key>CFBundleIdentifier</key><string>io.github.nguyenvanduocit.cleanup-mac</string>
+  <key>CFBundleExecutable</key><string>cleanup-mac</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>$1</string>
+  <key>CFBundleVersion</key><string>$1</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
