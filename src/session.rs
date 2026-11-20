@@ -2,7 +2,7 @@
 //! selected, the chosen action per item, and the progress of a run. Pure: the window renders it and feeds it the
 //! scanner's and executor's events.
 
-use crate::model::{Action, Category, Item, Safety, drop_nested};
+use crate::model::{Action, Category, Item, Safety, drop_nested, starts_selected};
 
 /// What the background scanner reports.
 pub enum ScanEvent {
@@ -112,7 +112,9 @@ impl Session {
     pub fn apply_scan(&mut self, event: ScanEvent) {
         match event {
             ScanEvent::Status(s) => self.scan_status = Some(s),
-            ScanEvent::Items(batch) => {
+            ScanEvent::Items(mut batch) => {
+                // The threshold may have changed since this scan started.
+                batch.iter_mut().for_each(|i| retick(i, self.min_unused_days));
                 let mut all = std::mem::take(&mut self.items);
                 all.extend(batch);
                 self.items = drop_nested(all);
@@ -120,6 +122,12 @@ impl Session {
             }
             ScanEvent::Done => self.scan_status = None,
         }
+    }
+
+    /// Tick again, by the new threshold, every item whose ticking depends on how long it went unused.
+    pub fn set_min_unused_days(&mut self, days: u64) {
+        self.min_unused_days = days;
+        self.items.iter_mut().for_each(|i| retick(i, days));
     }
 
     pub fn apply_exec(&mut self, event: ExecEvent) {
@@ -272,6 +280,17 @@ impl Session {
     }
 }
 
+/// Safe items with a known age are ticked when unused long enough; other items keep their action.
+fn retick(item: &mut Item, min_unused_days: u64) {
+    if item.safety == Safety::Safe && item.days_unused.is_some() {
+        let tick = starts_selected(item.safety, item.days_unused, min_unused_days);
+        // A ticked item keeps the action the owner picked for it (Delete stays Delete).
+        if tick != item.action.is_active() {
+            item.toggle();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,6 +336,26 @@ mod tests {
         assert_eq!(s.action_counts(), ActionCounts { trash: 2, ..ActionCounts::default() });
         s.toggle_all(&caches);
         assert_eq!(s.selected_count(), 0);
+    }
+
+    #[test]
+    fn changing_the_threshold_reticks_by_age_and_keeps_picked_actions() {
+        let aged = |name: &str, days: u64, action: Action| Item {
+            days_unused: Some(days),
+            ..item(Category::Build, name, &format!("/h/{name}"), 10, Safety::Safe, action)
+        };
+        let mut s = Session::new(7);
+        s.apply_scan(ScanEvent::Items(vec![aged("old", 9, Action::Delete), aged("new", 2, Action::Skip)]));
+        s.set_min_unused_days(10);
+        assert_eq!(s.items.iter().map(|i| i.action).collect::<Vec<_>>(), [Action::Skip, Action::Skip]);
+        s.set_min_unused_days(1);
+        assert_eq!(s.items.iter().filter(|i| i.action.is_active()).count(), 2);
+        s.set_min_unused_days(5);
+        s.apply_scan(ScanEvent::Items(vec![aged("late", 3, Action::Trash)]));
+        assert!(
+            s.items.iter().any(|i| i.name == "late" && i.action == Action::Skip),
+            "late finds use the new threshold"
+        );
     }
 
     #[test]

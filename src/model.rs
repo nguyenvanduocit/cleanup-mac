@@ -43,15 +43,6 @@ impl Category {
             Self::Review => "Large & old",
         }
     }
-
-    pub const fn description(self) -> &'static str {
-        match self {
-            Self::Caches => "Downloads and caches that tools fetch or rebuild by themselves",
-            Self::Build => "Build output next to a project, rebuilt on the next build",
-            Self::Tools => "Cleanup commands of the tools installed on this Mac",
-            Self::Review => "Large tool data and old downloads nothing explains — yours to judge",
-        }
-    }
 }
 
 /// Why an item is on the list.

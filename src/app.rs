@@ -123,11 +123,8 @@ impl App {
     }
 
     fn set_days(&self, days: u64) {
-        let s = self.session.get();
-        if !s.running() {
-            let mut next = s.rescanned();
-            next.min_unused_days = days;
-            self.start_scan(next);
+        if !self.session.get().running() {
+            self.edit(|s| s.set_min_unused_days(days));
         }
     }
 
@@ -230,7 +227,6 @@ impl App {
             .text_color(t.foreground)
             .track_focus(self.focus)
             .on_key_down(move |k| app.on_key(k))
-            .child(self.header(&s))
             .child((!self.full_disk_access.get()).then(|| self.access_banner()))
             .child(self.rules_error.get().map(|e| rules_banner(&e)))
             .child(
@@ -257,21 +253,26 @@ impl App {
         resizable_panel(&self.panes, index).flex().min_w_px(min)
     }
 
-    fn header(&self, s: &Session) -> Div {
+    /// Scan state and the two page actions: a spinner while scanning (Rescan otherwise) and Clean with what it frees.
+    fn actions(&self, s: &Session) -> Div {
         let t = theme();
-        let status = div().flex().items_center().gap(2.0).text_sm().text_color(t.muted_foreground);
-        let status = match &s.scan_status {
-            Some(msg) => status.child(spinner()).child(text(msg.clone()).truncate()),
-            None => status.child(icon(Icon::CircleCheck)).child("Scan complete"),
-        };
         let running = s.running();
         let selected = s.selected_count();
         let (rescan, open_run, review) = (self.clone(), self.clone(), self.clone());
+        let refresh = if s.scanning() {
+            div().size(9.0).flex().items_center().justify_center().child(spinner())
+        } else {
+            button(ButtonVariant::Ghost, ButtonSize::Icon)
+                .disabled(running)
+                .aria_label("Rescan")
+                .on_click(move |_| rescan.rescan())
+                .child(icon(Icon::RefreshCw))
+        };
         let clean = match s.run.as_ref().filter(|_| running) {
             Some(run) => button(ButtonVariant::Secondary, ButtonSize::Default)
                 .on_click(move |_| open_run.run_dialog.open())
                 .child(spinner())
-                .child(format!("Cleaning {}/{}", run.current, run.total)),
+                .child(format!("{}/{}", run.current, run.total)),
             None => button(ButtonVariant::Default, ButtonSize::Default)
                 .disabled(selected == 0)
                 .on_click(move |_| {
@@ -280,36 +281,10 @@ impl App {
                     }
                 })
                 .child(icon(Icon::Trash2))
-                .child("Review & clean"),
+                .child("Clean")
+                .child((selected > 0).then(|| text(human_size(s.reclaim_kb())).tabular_nums().opacity(0.7))),
         };
-        div()
-            .named("header")
-            .flex()
-            .items_center()
-            .gap(4.0)
-            .h(14.0)
-            .px(5.0)
-            .border_b()
-            .border_color(t.border)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(2.0)
-                    .child(icon(Icon::Sparkles))
-                    .child(text("Cleanup Mac").font_semibold().text_base()),
-            )
-            .child(div().flex_1().min_w(0.0).child(status))
-            .child(stat("Free", self.free_kb.get().map_or_else(|| "unknown".into(), human_size)))
-            .child(stat("Selected", format!("{selected} · {}", human_size(s.reclaim_kb()))))
-            .child(
-                button(ButtonVariant::Outline, ButtonSize::Default)
-                    .disabled(running)
-                    .on_click(move |_| rescan.rescan())
-                    .child(icon(Icon::RefreshCw))
-                    .child("Rescan"),
-            )
-            .child(clean)
+        div().flex().items_center().gap(2.0).text_color(t.foreground).child(refresh).child(clean)
     }
 
     fn access_banner(&self) -> Div {
@@ -317,17 +292,12 @@ impl App {
             alert(AlertVariant::Destructive, Some(Icon::ShieldAlert))
                 .child(alert_title("Full Disk Access is off"))
                 .child(
-                    alert_description(AlertVariant::Destructive)
-                        .child(
-                            "macOS hides parts of ~/Library and the Trash from Cleanup Mac until you allow it, so the \
-                             scan comes up short. Turn on Cleanup Mac under Full Disk Access; the scan reruns by itself.",
-                        )
-                        .child(
-                            button(ButtonVariant::Outline, ButtonSize::Sm)
-                                .mt(2.0)
-                                .on_click(|_| open(PRIVACY_PANE))
-                                .child("Open System Settings"),
-                        ),
+                    alert_description(AlertVariant::Destructive).child("Some folders are hidden from the scan.").child(
+                        button(ButtonVariant::Outline, ButtonSize::Sm)
+                            .mt(2.0)
+                            .on_click(|_| open(PRIVACY_PANE))
+                            .child("Open System Settings"),
+                    ),
                 ),
         )
     }
@@ -340,11 +310,7 @@ impl App {
         }
         nav = nav.child(div().h_px(1.0).my(2.0).bg(t.border)).child(self.nav_item(s, None, Icon::Layers, "Everything"));
 
-        let days = s.min_unused_days;
-        let (less, more) = (self.clone(), self.clone());
         let home = self.scope.home.clone();
-        let rules = self.rules.get();
-        let hint = |s: &str| text(s.to_owned()).text_xs().text_color(t.muted_foreground);
         div()
             .named("sidebar")
             .flex_1()
@@ -357,48 +323,28 @@ impl App {
             .child(nav)
             .child(
                 div()
-                    .flex_col()
-                    .gap(5.0)
-                    .p(2.0)
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(2.0)
                     .child(
-                        div()
-                            .flex_col()
-                            .gap(1.5)
-                            .child(stepper(
-                                "Tick build folders untouched for",
-                                if days == 1 { "1 day".into() } else { format!("{days} days") },
-                                move || less.set_days(days.saturating_sub(1)),
-                                move || more.set_days(days.saturating_add(1)),
-                            ))
-                            .child(hint("Newer ones are listed but left unticked, in case you are still using them.")),
+                        button(ButtonVariant::Ghost, ButtonSize::Sm)
+                            .justify_start()
+                            .on_click(move |_| {
+                                // A text editor, not whatever app claims .toml files.
+                                if let Ok(file) = rules::ensure_user_file(&home) {
+                                    let _ = Command::new("open").arg("-t").arg(&file).stdin(Stdio::null()).spawn();
+                                }
+                            })
+                            .child(icon(Icon::Pencil))
+                            .child("Edit rules"),
                     )
                     .child(
-                        div()
-                            .flex_col()
-                            .gap(1.5)
-                            .child(text("What it looks for").text_xs().text_color(t.muted_foreground))
-                            .child(
-                                text(format!(
-                                    "{} cache folders, {} kinds of build folder, {} tool cleanups",
-                                    rules.caches.len(),
-                                    rules.artifacts.len(),
-                                    rules.commands.len()
-                                ))
-                                .text_sm(),
-                            )
-                            .child(hint("Add folders it misses, or stop it listing one. Rescan to apply."))
-                            .child(
-                                button(ButtonVariant::Outline, ButtonSize::Sm)
-                                    .on_click(move |_| {
-                                        // A text editor, not whatever app claims .toml files.
-                                        if let Ok(file) = rules::ensure_user_file(&home) {
-                                            let _ =
-                                                Command::new("open").arg("-t").arg(&file).stdin(Stdio::null()).spawn();
-                                        }
-                                    })
-                                    .child(icon(Icon::Pencil))
-                                    .child("Edit the list"),
-                            ),
+                        text(self.free_kb.get().map_or_else(String::new, |kb| format!("{} free", human_size(kb))))
+                            .text_xs()
+                            .tabular_nums()
+                            .text_color(t.muted_foreground)
+                            .whitespace_nowrap(),
                     ),
             )
     }
@@ -435,10 +381,12 @@ impl App {
     }
 
     fn toolbar(&self, s: &Session, visible: &[usize]) -> Div {
-        let t = theme();
         let (only, all) = (self.clone(), self.clone());
         let vis = visible.to_vec();
         let all_on = s.all_selected(visible);
+        let days = s.min_unused_days;
+        let (less, more) = (self.clone(), self.clone());
+        let ages_matter = matches!(s.tab, None | Some(Category::Build));
         div()
             .named("toolbar")
             .flex_col()
@@ -448,14 +396,11 @@ impl App {
             .pb(3.0)
             .child(
                 div()
-                    .flex_col()
-                    .gap(1.0)
-                    .child(text(s.tab.map_or("Everything", Category::title)).text_lg().font_semibold())
-                    .child(
-                        text(s.tab.map_or("Everything the scan found", Category::description))
-                            .text_sm()
-                            .text_color(t.muted_foreground),
-                    ),
+                    .flex()
+                    .items_center()
+                    .gap(3.0)
+                    .child(text(s.tab.map_or("Everything", Category::title)).text_lg().font_semibold().flex_1())
+                    .child(self.actions(s)),
             )
             .child(
                 div()
@@ -476,6 +421,13 @@ impl App {
                             .child(text("Only selected").whitespace_nowrap()),
                     )
                     .child(div().flex_1())
+                    .child(ages_matter.then(|| {
+                        days_stepper(
+                            days,
+                            move || less.set_days(days.saturating_sub(1)),
+                            move || more.set_days(days.saturating_add(1)),
+                        )
+                    }))
                     .child(
                         button(ButtonVariant::Outline, ButtonSize::Sm)
                             .disabled(visible.is_empty())
@@ -498,8 +450,12 @@ impl App {
             .child(table_head("Safety"))
             .child(table_head("Action"));
         let rows: Vec<Div> = if visible.is_empty() {
-            let msg = if s.scanning() { "Scanning… items appear here as they are found." } else { "Nothing here." };
-            vec![table_empty(&columns, text(msg).text_color(t.muted_foreground))]
+            let msg = if s.scanning() {
+                div().flex().items_center().gap(2.0).child(spinner()).child("Scanning…")
+            } else {
+                div().child("Nothing here")
+            };
+            vec![table_empty(&columns, msg.text_color(t.muted_foreground))]
         } else {
             visible
                 .iter()
@@ -518,10 +474,7 @@ impl App {
             .pb(4.0)
             .child(table().child(table_header([head])).child(table_body(rows)))
             .child((capped > 0).then(|| {
-                text(format!("Showing the {ROW_LIMIT} largest; {capped} more — narrow with search."))
-                    .mt(3.0)
-                    .text_xs()
-                    .text_color(t.muted_foreground)
+                text(format!("+{capped} more · search to narrow")).mt(3.0).text_xs().text_color(t.muted_foreground)
             }))
     }
 
@@ -565,11 +518,13 @@ impl App {
         let t = theme();
         let panel = div().named("inspector").flex_1().min_w(0.0).flex_col().gap(5.0).p(5.0).overflow_y_scroll();
         let Some((index, item)) = highlighted.and_then(|n| s.items.get(n).map(|i| (n, i))) else {
-            return panel.child(
-                text("Select an item to see why it is listed and what can be done.")
-                    .text_sm()
-                    .text_color(t.muted_foreground),
-            );
+            return panel
+                .items_center()
+                .justify_center()
+                .gap(2.0)
+                .text_color(t.muted_foreground)
+                .child(icon(Icon::Info))
+                .child(text("Select an item").text_sm());
         };
         let mut facts = div().flex_col().gap(3.0).text_sm().child(fact("Why it is listed", item.source.explain()));
         if !item.note.is_empty() {
@@ -764,36 +719,28 @@ fn take_events<T>(rx: &RefCell<Option<Receiver<T>>>) -> Vec<T> {
     events
 }
 
-fn stat(label: &str, value: String) -> Div {
+/// `Unused ≥ [−] 7d [+]`, beside the list's Unused column: changing it re-ticks the rows in view.
+fn days_stepper(days: u64, less: impl Fn() + 'static, more: impl Fn() + 'static) -> Div {
     let t = theme();
     div()
-        .flex_col()
-        .items_end()
-        .child(text(label.to_owned()).text_xs().text_color(t.muted_foreground))
-        .child(text(value).text_sm().font_medium().tabular_nums())
-}
-
-fn stepper(label: &str, value: String, less: impl Fn() + 'static, more: impl Fn() + 'static) -> Div {
-    let t = theme();
-    div().flex_col().gap(1.5).child(text(label.to_owned()).text_xs().text_color(t.muted_foreground)).child(
-        div()
-            .flex()
-            .items_center()
-            .gap(2.0)
-            .child(
-                button(ButtonVariant::Outline, ButtonSize::IconSm)
-                    .on_click(move |_| less())
-                    .aria_label("Fewer days")
-                    .child(icon(Icon::Minus)),
-            )
-            .child(text(value).flex_1().text_center().font_medium().tabular_nums())
-            .child(
-                button(ButtonVariant::Outline, ButtonSize::IconSm)
-                    .on_click(move |_| more())
-                    .aria_label("More days")
-                    .child(icon(Icon::Plus)),
-            ),
-    )
+        .flex()
+        .items_center()
+        .gap(1.5)
+        .text_sm()
+        .child(text("Unused ≥").text_color(t.muted_foreground).whitespace_nowrap())
+        .child(
+            button(ButtonVariant::Outline, ButtonSize::IconSm)
+                .on_click(move |_| less())
+                .aria_label("Fewer days")
+                .child(icon(Icon::Minus)),
+        )
+        .child(text(format!("{days}d")).w(8.0).text_center().font_medium().tabular_nums())
+        .child(
+            button(ButtonVariant::Outline, ButtonSize::IconSm)
+                .on_click(move |_| more())
+                .aria_label("More days")
+                .child(icon(Icon::Plus)),
+        )
 }
 
 fn fact(label: &str, value: String) -> Div {
@@ -875,6 +822,10 @@ mod tests {
             item(Category::Caches, "npm cache", 2_000_000, Safety::Safe, Action::Trash),
             item(Category::Caches, "Hugging Face models", 9_000_000, Safety::Review, Action::Skip),
             item(Category::Review, "~/.rustup", 3_000_000, Safety::Manual, Action::Skip),
+            Item {
+                days_unused: Some(6),
+                ..item(Category::Build, "app · target", 1_000_000, Safety::Safe, Action::Skip)
+            },
         ]));
         session.apply_scan(ScanEvent::Done);
         app.session.set(Rc::new(session));
@@ -882,14 +833,23 @@ mod tests {
         let view = app.clone();
         let mut s = gui::Scenario::new(move || view.render(), &dir, 1280, 820, 1.0)?;
         s.frame("browse")?;
+        s.click_text("Build output")?;
+        s.settle()?;
+        let (x, y) = s.locate("7d")?;
+        s.click(x - 38.0, y); // the "−" beside it
+        s.settle()?;
+        s.frame("build output, 6 days")?;
+        s.locate("6d")?;
+        assert_eq!(app.session.get().selected_count(), 2, "6 days unused now counts");
+        s.click_text("Caches")?;
         let before = app.panes.sizes.get().first().copied().unwrap_or_default();
         s.drag((256.0, 500.0), (360.0, 500.0));
         assert!(app.panes.sizes.get().first().copied().unwrap_or_default() > before + 5.0, "sidebar did not widen");
         s.click_text("Hugging Face models")?;
         s.click_text("Move to Trash")?;
         s.frame("review item chosen")?;
-        assert_eq!(app.session.get().selected_count(), 2);
-        s.click_text("Review & clean")?;
+        assert_eq!(app.session.get().selected_count(), 3);
+        s.click_text("Clean")?;
         s.frame("confirm")?;
         s.locate("1 selected item(s) are not rated safe. Check each one before you go on.")?;
         s.click_text("Cancel")?;
