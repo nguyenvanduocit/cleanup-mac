@@ -1,0 +1,295 @@
+# Built-in rules for Cleanup Mac. Each one names something a tool can rebuild, and how safe giving it back is.
+#
+# Add or override rules in "~/Library/Application Support/Cleanup Mac/rules.toml" (same format). A user rule with the
+# same `id` as a built-in one replaces it; `enabled = false` turns a built-in rule off.
+#
+# safety:
+#   safe    the tool rebuilds it by itself; selected by default
+#   review  it rebuilds, but slowly, or with side effects worth a look; never selected by default
+#   manual  only the owner can judge; never selected by default
+#
+# Paths start with "~/" for the home folder. `mode = "contents"` empties the folder and keeps it.
+# `clean` is the tool's own cleanup command; when the tool is installed it is preferred over removing files.
+
+# ------------------------------------------------------------------ caches
+
+[[cache]]
+id = "npm"
+name = "npm cache"
+paths = ["~/.npm/_cacache", "~/.npm/_npx", "~/.npm/_logs"]
+safety = "safe"
+note = "Downloaded packages; npm fetches them again on the next install."
+
+[[cache]]
+id = "bun"
+name = "Bun install cache"
+paths = ["~/.bun/install/cache"]
+safety = "safe"
+note = "Downloaded packages; Bun fetches them again on the next install."
+
+[[cache]]
+id = "pnpm"
+name = "pnpm store"
+paths = ["~/Library/pnpm/store"]
+safety = "review"
+clean = ["pnpm", "store", "prune"]
+note = "Packages shared by every pnpm project. `pnpm store prune` removes only the ones no project uses."
+
+[[cache]]
+id = "cargo-registry"
+name = "Cargo registry"
+paths = ["~/.cargo/registry/cache", "~/.cargo/registry/src"]
+safety = "safe"
+note = "Downloaded crates and their unpacked sources; Cargo fetches them again on the next build."
+
+[[cache]]
+id = "cargo-git"
+name = "Cargo git checkouts"
+paths = ["~/.cargo/git/checkouts"]
+safety = "safe"
+note = "Working copies of git dependencies; Cargo checks them out again from its git database."
+
+[[cache]]
+id = "go-mod"
+name = "Go module cache"
+paths = ["~/go/pkg/mod"]
+safety = "safe"
+clean = ["go", "clean", "-modcache"]
+note = "Downloaded modules (read-only files, so Go's own command removes them)."
+
+[[cache]]
+id = "gradle"
+name = "Gradle caches"
+paths = ["~/.gradle/caches"]
+safety = "safe"
+note = "Dependencies and build caches; Gradle downloads and rebuilds them."
+
+[[cache]]
+id = "gradle-wrapper"
+name = "Gradle wrapper distributions"
+paths = ["~/.gradle/wrapper/dists"]
+safety = "review"
+note = "Each Gradle version a project used; the next build downloads its version again (~150 MB each)."
+
+[[cache]]
+id = "maven"
+name = "Maven repository"
+paths = ["~/.m2/repository"]
+safety = "review"
+note = "Downloaded artifacts; also holds anything installed locally with `mvn install`."
+
+[[cache]]
+id = "xcode-derived-data"
+name = "Xcode DerivedData"
+paths = ["~/Library/Developer/Xcode/DerivedData"]
+safety = "safe"
+note = "Build products and indexes; Xcode rebuilds them on the next build."
+
+[[cache]]
+id = "xcode-device-support"
+name = "Xcode device support"
+paths = ["~/Library/Developer/Xcode/iOS DeviceSupport", "~/Library/Developer/Xcode/watchOS DeviceSupport"]
+safety = "review"
+note = "Debug symbols per device OS version; Xcode copies them again when that device is plugged in."
+
+[[cache]]
+id = "xcode-archives"
+name = "Xcode Archives"
+paths = ["~/Library/Developer/Xcode/Archives"]
+safety = "manual"
+note = "Builds you shipped, with the dSYMs that symbolicate their crash reports. Cannot be rebuilt exactly."
+
+[[cache]]
+id = "simulator-caches"
+name = "Simulator caches"
+paths = ["~/Library/Developer/CoreSimulator/Caches"]
+safety = "safe"
+note = "Runtime caches; simulators rebuild them."
+
+[[cache]]
+id = "user-logs"
+name = "App logs"
+paths = ["~/Library/Logs"]
+mode = "contents"
+safety = "safe"
+note = "Log files apps write; nothing reads them back."
+
+[[cache]]
+id = "huggingface"
+name = "Hugging Face models"
+paths = ["~/.cache/huggingface"]
+safety = "review"
+note = "Downloaded models and datasets; can be many GB to download again."
+
+[[cache]]
+id = "ollama"
+name = "Ollama models"
+paths = ["~/.ollama/models"]
+safety = "manual"
+note = "Pulled models, including ones you created; `ollama rm` removes one at a time."
+
+# ------------------------------------------------------------------ build artifacts
+# A folder named `dir` next to one of `markers` (and none of `unless`) is that project's build output.
+
+[[artifact]]
+dir = "node_modules"
+markers = ["package.json"]
+safety = "safe"
+note = "Installed packages; the package manager installs them again."
+
+[[artifact]]
+dir = "target"
+markers = ["Cargo.toml"]
+safety = "safe"
+note = "Cargo build output; rebuilt on the next build."
+
+[[artifact]]
+dir = ".venv"
+markers = ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile"]
+safety = "safe"
+note = "Python virtual environment; recreated by uv, poetry or pip."
+
+[[artifact]]
+dir = "venv"
+markers = ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile"]
+safety = "safe"
+note = "Python virtual environment; recreated by uv, poetry or pip."
+
+[[artifact]]
+dir = ".next"
+markers = ["next.config.js", "next.config.mjs", "next.config.ts"]
+safety = "safe"
+note = "Next.js build output and cache."
+
+[[artifact]]
+dir = ".nuxt"
+markers = ["nuxt.config.ts", "nuxt.config.js"]
+safety = "safe"
+note = "Nuxt build output."
+
+[[artifact]]
+dir = ".output"
+markers = ["nuxt.config.ts", "nuxt.config.js"]
+safety = "safe"
+note = "Nuxt build output."
+
+[[artifact]]
+dir = ".svelte-kit"
+markers = ["svelte.config.js", "svelte.config.ts"]
+safety = "safe"
+note = "SvelteKit build output."
+
+[[artifact]]
+dir = ".angular"
+markers = ["angular.json"]
+safety = "safe"
+note = "Angular CLI cache."
+
+[[artifact]]
+dir = ".turbo"
+markers = ["turbo.json"]
+safety = "safe"
+note = "Turborepo cache."
+
+[[artifact]]
+dir = ".parcel-cache"
+markers = ["package.json"]
+safety = "safe"
+note = "Parcel cache."
+
+[[artifact]]
+dir = ".build"
+markers = ["Package.swift"]
+safety = "safe"
+note = "Swift Package Manager build output."
+
+[[artifact]]
+dir = ".gradle"
+markers = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+safety = "safe"
+note = "Gradle project cache."
+
+[[artifact]]
+dir = "build"
+markers = ["build.gradle", "build.gradle.kts"]
+safety = "safe"
+note = "Gradle build output."
+
+[[artifact]]
+dir = "Pods"
+markers = ["Podfile"]
+safety = "review"
+note = "CocoaPods dependencies; `pod install` restores them. Some teams commit this folder."
+
+[[artifact]]
+dir = "vendor"
+markers = ["composer.json"]
+unless = ["go.mod"]
+safety = "safe"
+note = "PHP Composer dependencies; `composer install` restores them."
+
+[[artifact]]
+dir = ".dart_tool"
+markers = ["pubspec.yaml"]
+safety = "safe"
+note = "Dart and Flutter tool cache."
+
+[[artifact]]
+dir = ".zig-cache"
+markers = ["build.zig"]
+safety = "safe"
+note = "Zig build cache."
+
+[[artifact]]
+dir = "_build"
+markers = ["mix.exs"]
+safety = "safe"
+note = "Elixir build output."
+
+[[artifact]]
+dir = ".terraform"
+markers = [".terraform.lock.hcl"]
+safety = "safe"
+note = "Terraform providers and modules; `terraform init` downloads them again."
+
+# ------------------------------------------------------------------ tool commands
+
+[[command]]
+id = "brew"
+name = "Homebrew cleanup"
+program = "brew"
+args = ["cleanup", "--prune=all", "-s"]
+safety = "review"
+note = "Removes old formula versions and Homebrew's download cache. Takes about 30 seconds."
+
+[[command]]
+id = "simulators"
+name = "Unavailable simulators"
+program = "xcrun"
+args = ["simctl", "delete", "unavailable"]
+safety = "safe"
+note = "Deletes simulators whose runtime is no longer installed."
+
+[[command]]
+id = "docker-build-cache"
+name = "Docker build cache"
+program = "docker"
+args = ["builder", "prune", "-af"]
+safety = "review"
+note = "Build layers; the next `docker build` is slower until they are cached again."
+
+[[command]]
+id = "docker-dangling-images"
+name = "Docker dangling images"
+program = "docker"
+args = ["image", "prune", "-f"]
+safety = "safe"
+note = "Untagged images no container uses."
+
+[[command]]
+id = "docker-volumes"
+name = "Docker unused volumes"
+program = "docker"
+args = ["volume", "prune", "-af"]
+safety = "manual"
+note = "Volumes no container uses right now — including stopped databases' data."

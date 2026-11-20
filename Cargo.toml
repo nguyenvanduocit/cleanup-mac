@@ -1,0 +1,34 @@
+[package]
+name = "cleanup-mac"
+version = "5.0.0"
+edition = "2024"
+rust-version = "1.99"
+description = "Cleanup Mac: find what a developer Mac can safely give back — caches, build artifacts, tool state — and why"
+license = "MIT"
+publish = false
+
+[dependencies]
+# The window: shadcn/ui components on shadcn-rs's own native GUI framework, pinned to a commit (not on crates.io).
+gui = { git = "https://github.com/nguyenvanduocit/shadcn-rs", rev = "64406e666935e224744456ce70a40b245aa02b16" }
+shadcn = { git = "https://github.com/nguyenvanduocit/shadcn-rs", rev = "64406e666935e224744456ce70a40b245aa02b16" }
+# Rules are data: the built-in rules.toml and the user's own file.
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+# Move to Trash the way Finder does, so "Put Back" works.
+trash = "5"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.release]
+strip = true
+
+# shadcn-rs's `gui` needs the cosmic-text fix released after 0.19.0 (ellipsized last line); Cargo applies only the
+# root workspace's patches, so a crate depending on `gui` carries it. Drop it when shadcn-rs drops it.
+[patch.crates-io]
+cosmic-text = { git = "https://github.com/pop-os/cosmic-text", rev = "c5d32054ad0f284873e344e0ea87902d9dc2bca8" }
